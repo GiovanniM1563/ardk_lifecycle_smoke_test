@@ -5,7 +5,7 @@
 
 The point of this project is to create a readymade, easy to use system that allows individuals to accelerate the arbitrary setup of ROS 2 robots, to allow them to focus on their own unique applications or additions. 
 
-Ideally, this system should be able to solve the "boring" parts of ROS2 integration, such as in this case, switching and orchestrating between different stacks on the fly, without the need to use ROS 2 CLI tools or create your own scripts to do so.
+Ideally, this system should be able to solve the "boring" parts of ROS2 integration such as switching and orchestrating between different stacks on the fly, without the need to use ROS 2 CLI tools or create your own scripts to do so.
 
 
 This repository contains the hardened lifecycle management system for ROS2 robots. It solves a problem I faced, switching between `MAPPING` (SLAM_Toolbox) and `NAVIGATION` (Nav2) actively and frequently.
@@ -68,7 +68,7 @@ This architecture strictly adheres to:
 
 ---
 
-## 🛠️ Usage Guide
+## Usage Guide
 
 ### 1. Launch the System
 ```bash
@@ -107,7 +107,7 @@ motion_authority: "nav2"
 ```
 ### 4. Finer Usage
 
-Nav2 and SLAM Toolbox are both controlled through their own APIs, and can be used independently of the state manager to get desired functionalities. 
+Nav2 and SLAM Toolbox are both controlled through their own APIs, and can be used independently of the state manager to get desired functionalities. You can for example read the /ardk_status to check the mode to ensure the right stack is operational, and then use its corresponding APIs (I.E. map saving, Pose Routing etc.) 
 
 
 ## Future WIP
@@ -137,4 +137,4 @@ python3 src/ardk_lifecycle/tests/cycle_test.py
 - [x] **MAPPING -> NAVIGATION**: Map saved, SLAM stopped, Nav2 Activated, TF Tree valid.
 - [x] **NAVIGATION -> IDLE**: Clean shutdown, no lingering processes.
 
-*Current Status: **Verified Stable on RPi 5/Jazzy/CycloneDDS.***
+*Current Status: **Tested on RPi 5/Ubuntu 24.04 Server/Jazzy/CycloneDDS.***

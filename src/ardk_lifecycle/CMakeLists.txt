@@ -26,10 +26,11 @@ ament_python_install_package(ardk)
 install(PROGRAMS
   scripts/state_manager.py
   DESTINATION lib/${PROJECT_NAME}
+  RENAME state_manager
 )
 
 # Install launch files
-install(DIRECTORY launch
+install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}
 )
 

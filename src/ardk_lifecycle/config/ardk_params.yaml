@@ -1,0 +1,8 @@
+state_manager:
+  ros__parameters:
+    # Path to the Nav2 Configuration file
+    nav_config_path: "/home/gio/rpi_robot/config/nav2_params.yaml"
+    # Path to the SLAM Toolbox Configuration file
+    slam_config_path: "/home/gio/rpi_robot/config/slam_params.yaml"
+    # Default map path to save/load if none specified
+    default_map_path: "/home/gio/ARDK_2/maps/autosave"

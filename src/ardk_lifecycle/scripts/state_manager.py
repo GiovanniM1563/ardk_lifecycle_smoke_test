@@ -42,7 +42,11 @@ class StateManager(Node):
         self.cli_loc = self.create_client(ManageLifecycleNodes, "/lifecycle_manager_localization/manage_nodes")
         self.cli_nav = self.create_client(ManageLifecycleNodes, "/lifecycle_manager_navigation/manage_nodes")
         self.cli_load_map = self.create_client(LoadMap, "/map_server/load_map")
-        self.cli_save_map = self.create_client(SaveMap, "/slam_toolbox/save_map")
+        self.declare_parameter("nav_config_path", "")
+        self.declare_parameter("slam_config_path", "")
+        self.declare_parameter("default_map_path", "")
+        
+        self.cli_save_map = self.create_client(SaveMap, '/slam_toolbox/save_map')
 
         # Service
         self.srv = self.create_service(
@@ -56,11 +60,18 @@ class StateManager(Node):
         
         # Resident Nav2: Start once, keep alive. (Principle 1)
         # Use Composition to save DDS resource/participants
+        nav_config = self.get_parameter("nav_config_path").value
+        map_path = self.get_parameter("default_map_path").value
+        if map_path and not map_path.endswith(".yaml"):
+            map_path += ".yaml"
+        # We assume user passes map path in request, or we use default
+        
         self._nav2_cmd = (
             "ros2 launch nav2_bringup bringup_launch.py "
             "use_sim_time:=false autostart:=false use_composition:=True "
-            "params_file:=/home/gio/rpi_robot/config/nav2_params.yaml map:=/home/gio/ARDK_2/maps/ardk_smoke_map.yaml"
+            f"params_file:={nav_config} map:={map_path}"
         )
+        self.get_logger().info(f"Nav2 CMD: {self._nav2_cmd}")
         self.nav_proc = nav_runner.start(self._nav2_cmd)
         
         # Initial wait for services (one time cost)
@@ -186,16 +197,23 @@ class StateManager(Node):
                 self.nav_lifecycle_active = False
             else:
                 self.get_logger().info("Nav stacks already down (Skipping shutdown).")
-            
-        if not self.slam_proc:
+               
+        slam_config = self.get_parameter("slam_config_path").value
+        if not slam_config:
+             self.get_logger().warn("slam_config_path param not set! SLAM might fail.")
+        
+        try:
+            # 2. Start SLAM (Process)
             self.get_logger().info("Starting SLAM Toolbox...")
-            params = "/home/gio/rpi_robot/config/slam_params.yaml"
-            self.slam_proc = slam_runner.start(params)
+            self.slam_proc = slam_runner.start(params_yaml=slam_config)
             
-            # Principle 4: Readiness Gate (No Sleep)
+            # 3. Wait for Readiness Gate (No Sleep)
             self.get_logger().info("Waiting for Map Topic...")
             # Polling instead of sleep
             wait_for_topic(self, 10.0, '/map')
+            
+        except Exception as e:
+            return False, f"Failed to start SLAM: {e}"
             
         return True, "Switched to MAPPING"
 
@@ -206,9 +224,9 @@ class StateManager(Node):
             # 1. Save Map if coming from Mapping
             if self.slam_proc:
                 self.get_logger().info(f"Saving map...")
-                path = req.map_yaml_path if req.map_yaml_path else "/home/gio/ARDK_2/maps/autosave"
-                
-                # Principle 4: Check map freshness (replaces sleep)
+                default_path = self.get_parameter("default_map_path").value
+                path = req.map_yaml_path if req.map_yaml_path else default_path
+                self.get_logger().info(f"Saving map to: {path}")
                 slam_runner.save_map(self, path)
                 
                 self.get_logger().info("Stopping SLAM...")
@@ -238,7 +256,12 @@ class StateManager(Node):
             # If rollback happens, we call shutdown, which sets active=False. Correct.
             
             # B) Load Map (Robustness: Retry Logic)
-            map_path = req.map_yaml_path if req.map_yaml_path else "/home/gio/ARDK_2/maps/autosave.yaml"
+            default_path = self.get_parameter("default_map_path").value
+            # Ensure extension if default used
+            if default_path and not default_path.endswith(".yaml"):
+                 default_path += ".yaml"
+                 
+            map_path = req.map_yaml_path if req.map_yaml_path else default_path
             self.get_logger().info(f"Loading map: {map_path}")
             
             # Robustness: Wait longer for map_server service (RPi constraints)

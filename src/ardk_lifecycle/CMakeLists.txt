@@ -15,6 +15,7 @@ find_package(lifecycle_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetMode.srv"
+  "msg/ARDKStatus.msg"
   DEPENDENCIES std_msgs
 )
 

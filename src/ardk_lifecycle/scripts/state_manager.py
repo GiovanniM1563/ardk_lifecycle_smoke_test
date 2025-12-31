@@ -42,6 +42,20 @@ class StateManager(Node):
         )
         
         self.get_logger().info("ARDK State Manager Ready. Current State: IDLE")
+        
+        # Resident Nav2: Start once, keep alive.
+        # Use Composition to save DDS resource/participants
+        self._nav2_cmd = (
+            "ros2 launch nav2_bringup bringup_launch.py "
+            "use_sim_time:=false autostart:=false use_composition:=True "
+            "params_file:=/home/gio/rpi_robot/config/nav2_params.yaml map:=/home/gio/ARDK_2/maps/ardk_smoke_map.yaml"
+        )
+        self.nav_proc = nav_runner.start(self._nav2_cmd)
+        
+        # Initial wait for services (one time cost)
+        wait_for_services(self, 120.0, 
+                          "/lifecycle_manager_localization/manage_nodes",
+                          "/lifecycle_manager_navigation/manage_nodes")
 
     def handle_set_mode(self, req, resp):
         with self.lock:
@@ -101,20 +115,17 @@ class StateManager(Node):
             self.slam_proc = None
             
         if self.nav_proc:
-            self.get_logger().info("Stopping Nav2...")
-            # Ideally try graceful shutdown of lifecycle first, but for IDLE hard stop is okay/faster
-            nav_runner.shutdown_loc_nav(self, timeout_sec=5.0)
-            nav_runner.stop(self.nav_proc)
-            self.nav_proc = None
+            self.get_logger().info("Shutting down Nav stacks (Cycle Down)...")
+            nav_runner.shutdown_loc_nav(self, timeout_sec=20.0)
+            # Do NOT stop the process
             
         return True, "Switched to IDLE"
 
     def _to_mapping(self, req):
-        # Stop Nav if running
+        # Stop Nav stacks if active (but keep process)
         if self.nav_proc:
-            self._stop_motion()
-            nav_runner.stop(self.nav_proc)
-            self.nav_proc = None
+            self.get_logger().info("Ensuring Nav stacks are down for Mapping...")
+            nav_runner.shutdown_loc_nav(self, timeout_sec=20.0)
             
         if not self.slam_proc:
             self.get_logger().info("Starting SLAM Toolbox...")
@@ -154,39 +165,31 @@ class StateManager(Node):
             
             # Verify stopped? subprocesswait is called in stop()
             
-        # 2. Start Nav if not running
+        # 2. Resident Nav2: Ensure process is running
         if not self.nav_proc:
-            self.get_logger().info("Starting Nav2 Bringup...")
-            # We hardcode the verified cmd for now, or could use params
-            cmd = "ros2 launch nav2_bringup bringup_launch.py use_sim_time:=false autostart:=false use_composition:=False params_file:=/home/gio/rpi_robot/config/nav2_params.yaml map:=/home/gio/ARDK_2/maps/ardk_smoke_map.yaml"
-            self.nav_proc = nav_runner.start(cmd)
-            
-            # Wait for services to be up (lifecycle managers need time to launch)
-            # nav_runner.start returns Popen immediately.
-            # We need to wait for ManageLifecycleNodes services to appear.
+            self.get_logger().warn("Nav2 process was missing, restarting...")
+            self.nav_proc = nav_runner.start(self._nav2_cmd)
             wait_for_services(self, 120.0, 
                               "/lifecycle_manager_localization/manage_nodes",
                               "/lifecycle_manager_navigation/manage_nodes")
 
-        # 3. Startup (Configure & Activate)
-        # With autostart:=false, we MUST bring up nodes before services like LoadMap are available
-        self.get_logger().info("Activating Lifecycle stacks...")
-        nav_runner.startup_loc_nav(self)
+        # 3. Startup Sequence
+        # A) Localization (brings up map_server)
+        self.get_logger().info("Starting Localization...")
+        nav_runner.startup_localization(self, timeout_sec=30.0)
         
-        # 4. Load Map (if switching map is needed)
-        # Note: startup_loc_nav loads the map specified in params/CLI argument (ARDK_2/maps/ardk_smoke_map.yaml)
-        # We only need LoadMap if we want to switch to 'autosave.yaml' (if provided)
-        map_path = req.map_yaml_path
-        if not map_path:
-             map_path = "/home/gio/ARDK_2/maps/autosave.yaml"
-             
+        # B) Load Map
+        map_path = req.map_yaml_path if req.map_yaml_path else "/home/gio/ARDK_2/maps/autosave.yaml"
         self.get_logger().info(f"Loading map: {map_path}")
-        # Now that map_server is Active, we can wait for its service
-        wait_for_services(self, 20.0, "/map_server/load_map") 
+        # Now that map_server is active (from step A), we can use it
+        wait_for_services(self, 20.0, "/map_server/load_map")
         nav_runner.load_map(self, map_path)
-
         
-        # 5. Wait Readiness
+        # C) Navigation
+        self.get_logger().info("Starting Navigation...")
+        nav_runner.startup_navigation(self, timeout_sec=30.0)
+        
+        # 4. Wait Readiness
         self.get_logger().info("Verifying Readiness...")
         wait_for_tf_chain(self, self.tf_buffer, 10.0, "map", "odom", "base_link")
         

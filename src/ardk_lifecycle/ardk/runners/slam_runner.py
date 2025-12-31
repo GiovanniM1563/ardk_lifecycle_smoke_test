@@ -38,11 +38,11 @@ def save_map(node: Node, out_prefix: str, timeout_sec: float = 5.0) -> None:
 
     fut = client.call_async(req)
     if node.executor:
-        try:
-             # Block if in executor
-             res = fut.result(timeout=timeout_sec)
-        except Exception:
-             pass
+        start_time = time.time()
+        while not fut.done():
+            if time.time() - start_time > timeout_sec:
+                break
+            time.sleep(0.1)
     else:
         rclpy.spin_until_future_complete(node, fut, timeout_sec=timeout_sec)
 

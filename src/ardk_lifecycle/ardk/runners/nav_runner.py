@@ -8,7 +8,9 @@ import time
 # Service Names Verification from Smoke Test
 SRV_LOC = "/lifecycle_manager_localization/manage_nodes"
 SRV_NAV = "/lifecycle_manager_navigation/manage_nodes"
-SRV_MAP = "/map_server/load_map"
+SRV_LOC = "/lifecycle_manager_localization/manage_nodes"
+SRV_NAV = "/lifecycle_manager_navigation/manage_nodes"
+SRV_LOAD_MAP = "/map_server/load_map"
 
 def start(nav2_cmd: str) -> subprocess.Popen:
     """
@@ -30,10 +32,11 @@ def load_map(node: Node, map_yaml: str, timeout_sec: float = 5.0) -> None:
     req.map_url = map_yaml
     fut = client.call_async(req)
     if node.executor:
-        try:
-             res = fut.result(timeout=timeout_sec)
-        except Exception:
-             pass
+        start_time = time.time()
+        while not fut.done():
+            if time.time() - start_time > timeout_sec:
+                break
+            time.sleep(0.1)
     else:
         rclpy.spin_until_future_complete(node, fut, timeout_sec=timeout_sec)
     
@@ -51,19 +54,31 @@ def load_map(node: Node, map_yaml: str, timeout_sec: float = 5.0) -> None:
              if isinstance(resp.result, int) and resp.result != 0:
                  raise RuntimeError(f"LoadMap failed with code {resp.result}")
 
+def startup_localization(node: Node, timeout_sec: float = 20.0) -> None:
+    _manage_lifecycle(node, SRV_LOC, ManageLifecycleNodes.Request.STARTUP, timeout_sec)
+
+def shutdown_localization(node: Node, timeout_sec: float = 20.0) -> None:
+    _manage_lifecycle(node, SRV_LOC, ManageLifecycleNodes.Request.SHUTDOWN, timeout_sec)
+
+def startup_navigation(node: Node, timeout_sec: float = 20.0) -> None:
+    _manage_lifecycle(node, SRV_NAV, ManageLifecycleNodes.Request.STARTUP, timeout_sec)
+
+def shutdown_navigation(node: Node, timeout_sec: float = 20.0) -> None:
+    _manage_lifecycle(node, SRV_NAV, ManageLifecycleNodes.Request.SHUTDOWN, timeout_sec)
+
 def startup_loc_nav(node: Node, timeout_sec: float = 10.0) -> None:
     """
     Start localization then navigation lifecycle managers.
     """
-    _manage_lifecycle(node, SRV_LOC, ManageLifecycleNodes.Request.STARTUP, timeout_sec)
-    _manage_lifecycle(node, SRV_NAV, ManageLifecycleNodes.Request.STARTUP, timeout_sec)
+    startup_localization(node, timeout_sec)
+    startup_navigation(node, timeout_sec)
 
 def shutdown_loc_nav(node: Node, timeout_sec: float = 10.0) -> None:
     """
     Shutdown navigation then localization lifecycle managers.
     """
-    _manage_lifecycle(node, SRV_NAV, ManageLifecycleNodes.Request.SHUTDOWN, timeout_sec)
-    _manage_lifecycle(node, SRV_LOC, ManageLifecycleNodes.Request.SHUTDOWN, timeout_sec)
+    shutdown_navigation(node, timeout_sec)
+    shutdown_localization(node, timeout_sec)
 
 def stop(handle: subprocess.Popen) -> None:
     """
@@ -81,10 +96,11 @@ def _manage_lifecycle(node: Node, service_name: str, command: int, timeout_sec: 
     req.command = command
     fut = client.call_async(req)
     if node.executor:
-        try:
-             res = fut.result(timeout=timeout_sec)
-        except Exception:
-             pass
+        start_time = time.time()
+        while not fut.done():
+            if time.time() - start_time > timeout_sec:
+                break
+            time.sleep(0.1)
     else:
         rclpy.spin_until_future_complete(node, fut, timeout_sec=timeout_sec)
     

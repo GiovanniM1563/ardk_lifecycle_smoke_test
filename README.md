@@ -2,16 +2,36 @@
 
 A ROS 2 orchestration layer that manages mode transitions between SLAM mapping and Nav2 navigation.
 
+**Status: Work in Progress** - Core functionality is implemented and tested on a single platform. Expect rough edges.
+
+## Why Use This
+
+If you're building a robot with ROS 2 and want to:
+- Switch between mapping and navigation without restarting nodes or writing shell scripts
+- Control your robot's nav stack from a web app, mobile app, or external system
+- Have a consistent API layer between your application code and ROS internals
+- Avoid dealing with Nav2/SLAM lifecycle management directly
+
+This handles those pieces so you can focus on your application logic.
+
+## What Problems It Solves
+
+**The lifecycle problem**: Nav2 and slam_toolbox use ROS 2 lifecycle nodes. Getting them to start, configure, activate, and deactivate in the right order—especially when switching between modes—requires careful sequencing. This handles that.
+
+**The exclusivity problem**: You can't run SLAM and AMCL at the same time (they both want to publish the map→odom transform). This enforces mutual exclusivity and handles the teardown/startup sequence.
+
+**The integration problem**: ROS 2 command-line tools work fine for development, but integrating with external systems (web dashboards, fleet managers, custom apps) requires an API layer. This provides one.
+
 ## What This Is
 
-A state manager and REST API for switching a robot between Mapping, Navigation, and Idle modes. It handles the lifecycle management of `slam_toolbox` and `nav2` so you don't have to write custom launch scripts.
+A state manager and REST API for switching a robot between Mapping, Navigation, and Idle modes. It handles the lifecycle management of `slam_toolbox` and `nav2` so you don't have to write custom scripts or actively manage state.
 
-## What This Is Not
+## Limitations
 
-- Not a complete robot framework
-- Not hardened for production use
-- Not a security solution (the API is completely open)
-- Not tested beyond Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy
+- Not hardened for production (no authentication, limited error recovery)
+- Only tested on Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy
+- Requires your hardware layer (odometry, LiDAR) to be running separately
+- Configuration files (nav2_params.yaml, slam_params.yaml) not included—you bring your own
 
 ---
 

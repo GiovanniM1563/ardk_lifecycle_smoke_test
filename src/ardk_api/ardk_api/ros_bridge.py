@@ -48,9 +48,13 @@ class ARDKRosBridge(Node):
             raise RuntimeError("SLAM SaveMap service not available")
             
         req = SaveMap.Request()
-        s = String()
-        s.data = name
-        req.name = s
+        # Handle version differences: some slam_toolbox use string, others use std_msgs/String
+        if isinstance(req.name, str):
+            req.name = name
+        else:
+            s = String()
+            s.data = name
+            req.name = s
         
         return await self._call_service(self.cli_save_map, req)
 

@@ -92,9 +92,13 @@ def save_map(node: Node, out_prefix: str, timeout_sec: float = 5.0) -> None:
         raise RuntimeError("Timeout waiting for /slam_toolbox/save_map")
 
     req = SaveMap.Request()
-    name_msg = String()
-    name_msg.data = out_prefix
-    req.name = name_msg
+    # Handle version differences: some slam_toolbox use string, others use std_msgs/String
+    if isinstance(req.name, str):
+        req.name = out_prefix
+    else:
+        name_msg = String()
+        name_msg.data = out_prefix
+        req.name = name_msg
 
     fut = client.call_async(req)
     if node.executor:

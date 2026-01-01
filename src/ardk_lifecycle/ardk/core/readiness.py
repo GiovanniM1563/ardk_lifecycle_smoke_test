@@ -24,6 +24,19 @@ def wait_for_services(node: Node, timeout_sec: float, *service_names: str) -> No
     node.get_logger().error(f"Timeout waiting for services: {missing}. Available: {sorted(list(available))}")
     raise RuntimeError(f"Timeout waiting for services: {missing}")
 
+def wait_for_service_loss(node: Node, timeout_sec: float, service_name: str) -> None:
+    """
+    Wait until 'service_name' disappears from the graph.
+    Used for exclusivity checks (e.g., ensuring SLAM is fully gone before starting AMCL).
+    """
+    deadline = time.time() + timeout_sec
+    while rclpy.ok() and time.time() < deadline:
+        available = set(name for (name, _) in node.get_service_names_and_types())
+        if service_name not in available:
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"Timeout waiting for service to disappear: {service_name}")
+
 def wait_for_topic(node: Node, timeout_sec: float, topic_name: str) -> None:
     """
     Wait until 'topic_name' appears in the graph.

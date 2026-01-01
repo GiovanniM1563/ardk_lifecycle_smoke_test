@@ -16,7 +16,7 @@ from tf2_ros import Buffer, TransformListener
 from ardk_lifecycle.srv import SetMode
 from ardk_lifecycle.msg import ARDKStatus
 from ardk.runners import slam_runner, nav_runner
-from ardk.core.readiness import wait_for_services, wait_for_tf_chain, wait_for_topic
+from ardk.core.readiness import wait_for_services, wait_for_tf_chain, wait_for_topic, wait_for_service_loss
 from nav2_msgs.srv import ManageLifecycleNodes, LoadMap
 from slam_toolbox.srv import SaveMap
 
@@ -128,20 +128,17 @@ class StateManager(Node):
             return False, "Unknown mode"
 
     def _stop_motion(self):
-        """Principle 7: Motion Safe Primitive"""
+        """Principle 7: Motion Safe Primitive - Reliably stop all motion."""
         msg = Twist()
-        # Publish zero velocity
-        try:
-            for _ in range(5):
+        # Publish zero velocity with spacing for reliable delivery
+        for _ in range(5):
+            try:
                 self.vel_pub.publish(msg)
-                # time.sleep(0.05) # Blocking in callback? 
-                # Better to just publish a few times quickly.
-        except Exception:
-            pass # Ignore publishing errors during fault/teardown
-            time.sleep(0.05)
+            except Exception:
+                pass  # Ignore publishing errors during fault/teardown
+            time.sleep(0.05)  # 50ms spacing ensures commands land on the wire
         
         # Todo: Cancel Nav2 goals if we had that client accessible/needed
-        # For now, just ensuring 0 cmd_vel is the priority
 
     def _enter_fault(self):
         self.get_logger().error("ENTERING FAULT STATE - KILLING EVERYTHING")
@@ -234,8 +231,9 @@ class StateManager(Node):
                 slam_runner.stop(self.slam_proc)
                 self.slam_proc = None
                 
-                # Principle 2: Exclusivity Invariant
-                time.sleep(1.0) 
+                # Principle 2: Exclusivity Invariant - verify SLAM is truly gone
+                self.get_logger().info("Verifying SLAM shutdown (waiting for service loss)...")
+                wait_for_service_loss(self, 30.0, '/slam_toolbox/save_map') 
                 
             # 2. Start Nav2 if not running (On-Demand)
             if not self.nav_proc:

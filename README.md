@@ -26,11 +26,28 @@ This project aims to treat the robot's navigation stack as a reliable "black box
 
 Disclaimer: These systems do not claim to be 100 percent reliable or Safe, caution should still be exercised! Do your own Due Diligence!  
 
-### 4. Fast API service
--- **External Control**: Send commands to your navigation stack via a web api, allowing external control via a custom web app!
--- **SLAM and NAV Support**: Basic control over your navigation stack, such as map saving, map selecting, parameters, and more.
+### 4. Fast API Service
+- **External Control**: Send commands to your navigation stack via a web API, allowing external control via a custom web app!
+- **SLAM and NAV Support**: Basic control over your navigation stack, such as map saving, map selecting, parameters, and more.
 
-Disclaimer: The api is open, you need to design your own security solution for a production machine!
+*Disclaimer: The API is open—you need to design your own security solution for a production machine!*
+
+---
+
+## Architecture
+
+### On-Demand Nav2 Pattern
+The state manager uses an **on-demand launch strategy** for Nav2 to avoid lifecycle state issues:
+- Nav2 stack is **only launched** when transitioning to NAVIGATION mode
+- This prevents nodes from entering the unrecoverable `finalized` state
+- SLAM and Nav2 stacks are mutually exclusive—never running simultaneously
+
+### SLAM Lifecycle Activation
+When entering MAPPING mode, the system explicitly activates the `slam_toolbox` lifecycle node:
+1. Launch SLAM process
+2. Wait for node to appear in the ROS graph
+3. Call `configure` → `activate` lifecycle transitions
+4. Verify map topic availability before completing transition
 
 ---
 

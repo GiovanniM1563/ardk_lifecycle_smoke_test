@@ -16,7 +16,7 @@ This handles those pieces so you can focus on your application logic.
 
 ## What Problems It Solves
 
-**The lifecycle problem**: Nav2 and slam_toolbox use ROS 2 lifecycle nodes. Getting them to start, configure, activate, and deactivate in the right order—especially when switching between modes—requires careful sequencing. This handles that.
+**The lifecycle problem**: Nav2 and slam_toolbox use ROS 2 lifecycle nodes. Getting them to start, configure, activate, and deactivate in the right orderrequires careful sequencing. This handles that.
 
 **The exclusivity problem**: Enforces mutual exclusivity and handles the teardown/startup sequence.
 

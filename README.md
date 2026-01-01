@@ -144,7 +144,9 @@ curl -X POST http://localhost:8000/nav/goal -H "Content-Type: application/json" 
 
 ## Sample Frontend
 
-A web-based control panel is included in `frontend/index.html`.
+A web-based control panel is included in `frontend/index.html` to demonstrate some ARDK control Features, TELEOP coming soon.
+
+![ARDK Frontend](frontend_pic.png)
 
 **Features:**
 - Live map visualization from `/ardk/map`
@@ -166,7 +168,7 @@ python3 -m http.server 8080 -d frontend
 http://<robot-ip>:8080
 ```
 
-The frontend auto-detects the robot host from the URL.
+The frontend auto-detects the robot host from the URL. 
 
 ## Testing
 

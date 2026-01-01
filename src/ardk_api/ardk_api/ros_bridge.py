@@ -30,6 +30,11 @@ class ARDKRosBridge(Node):
         self.act_nav = ActionClient(self, NavigateToPose, '/navigate_to_pose')
         self.act_plan = ActionClient(self, ComputePathToPose, '/compute_path_to_pose')
         
+        # --- Goal State Tracking (Milestone 4) ---
+        self._goal_handle = None
+        self._goal_state = "idle"  # idle, active, succeeded, failed, canceled
+        self._goal_message = ""
+        
         # --- Status Subscription ---
         self._latest_status = None
         self.sub_status = self.create_subscription(
@@ -103,24 +108,82 @@ class ARDKRosBridge(Node):
         return await self._call_service(self.cli_load_map, req)
         
     async def navigate_to_pose(self, pose: PoseStamped):
+        """Send a navigation goal and track state."""
         if not self.act_nav.wait_for_server(timeout_sec=2.0):
             raise RuntimeError("Nav2 NavigateToPose action not available")
             
         goal = NavigateToPose.Goal()
         goal.pose = pose
         
-        # Action calls are 2-stage: Send Goal -> Get Handle -> Get Result
-        # For simplicity here, we will just send goal and return the UUID or simple confirmation, 
-        # or wait for result? User said "send goal poses". Usually implies firing it off.
-        # But let's try to at least confirm it was accepted.
-        
-        send_goal_future = self.act_nav.send_goal_async(goal)
+        # Send goal with feedback callback
+        send_goal_future = self.act_nav.send_goal_async(
+            goal, 
+            feedback_callback=self._nav_feedback_callback
+        )
         goal_handle = await self._wrap_future(send_goal_future)
         
         if not goal_handle.accepted:
+            self._goal_state = "failed"
+            self._goal_message = "Goal was rejected"
             raise RuntimeError("Goal was rejected")
-            
-        return {"goal_id": goal_handle.goal_id.uuid.tolist(), "status": "accepted"}
+        
+        # Track the goal
+        self._goal_handle = goal_handle
+        self._goal_state = "active"
+        self._goal_message = "Navigating to goal"
+        
+        # Set up result callback (non-blocking)
+        goal_handle.get_result_async().add_done_callback(self._nav_result_callback)
+        
+        return {"goal_id": goal_handle.goal_id.uuid.tolist(), "accepted": True}
+
+    def _nav_feedback_callback(self, feedback_msg):
+        """Handle navigation feedback."""
+        fb = feedback_msg.feedback
+        self._goal_message = f"Distance remaining: {fb.distance_remaining:.2f}m"
+
+    def _nav_result_callback(self, future):
+        """Handle navigation result."""
+        try:
+            result = future.result()
+            status = result.status
+            # Status codes: 4=SUCCEEDED, 5=CANCELED, 6=ABORTED
+            if status == 4:
+                self._goal_state = "succeeded"
+                self._goal_message = "Goal reached"
+            elif status == 5:
+                self._goal_state = "canceled"
+                self._goal_message = "Goal canceled"
+            else:
+                self._goal_state = "failed"
+                self._goal_message = f"Navigation failed (status={status})"
+        except Exception as e:
+            self._goal_state = "failed"
+            self._goal_message = str(e)
+        finally:
+            self._goal_handle = None
+
+    async def cancel_goal(self):
+        """Cancel the active navigation goal."""
+        if self._goal_handle is None:
+            return {"success": False, "message": "No active goal"}
+        
+        cancel_future = self._goal_handle.cancel_goal_async()
+        cancel_response = await self._wrap_future(cancel_future)
+        
+        self._goal_state = "canceled"
+        self._goal_message = "Goal canceled by user"
+        self._goal_handle = None
+        
+        return {"success": True, "message": "Goal canceled"}
+
+    def get_nav_state(self):
+        """Get current navigation goal state."""
+        return {
+            "state": self._goal_state,
+            "message": self._goal_message,
+            "has_active_goal": self._goal_handle is not None
+        }
 
     async def compute_path(self, pose: PoseStamped, start: PoseStamped = None):
         if not self.act_plan.wait_for_server(timeout_sec=2.0):

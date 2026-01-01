@@ -108,12 +108,34 @@ async def load_map(req: LoadMapRequest):
 
 @app.post("/nav/goal")
 async def send_goal(req: PoseRequest):
+    """Send a navigation goal. Must be in NAVIGATION mode."""
     try:
+        # Check if in NAVIGATION mode
+        status = ros_manager.node.get_status()
+        if status is None or status["mode"] != 2:
+            raise HTTPException(status_code=400, detail="Must be in NAVIGATION mode to send goals")
+        
         pose = create_pose_stamped(req, ros_manager.node.get_clock().now)
         res = await ros_manager.node.navigate_to_pose(pose)
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/nav/cancel")
+async def cancel_goal():
+    """Cancel the active navigation goal."""
+    try:
+        res = await ros_manager.node.cancel_goal()
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/nav/state")
+async def get_nav_state():
+    """Get current navigation goal state (idle/active/succeeded/failed/canceled)."""
+    return ros_manager.node.get_nav_state()
 
 @app.post("/nav/route")
 async def compute_route(req: PoseRequest):

@@ -1,107 +1,182 @@
-# ARDK Lifecycle & Mode Management System
+# ARDK - Appliance Robot Development Kit
 
-**"Appliance Robot Development Kit"**
+A ROS 2 orchestration layer that manages mode transitions between SLAM mapping and Nav2 navigation.
 
-This project implements a lightweight deterministic orchestration layer designed to simplify the complex task of managing robot states in ROS 2. It provides a robust, fail-safe mechanism for switching between Mapping (SLAM) and Navigation modes without the fragility often associated with custom scripts or manual CLI commands.
+## What This Is
 
-Future work will involve creating a command mux for orchestrated movement control.
+A state manager and REST API for switching a robot between Mapping, Navigation, and Idle modes. It handles the lifecycle management of `slam_toolbox` and `nav2` so you don't have to write custom launch scripts.
 
-This project aims to treat the robot's navigation stack as a reliable "black box" appliance, focusing on their unique application logic rather than the low-level intricacies of ROS 2 lifecycle management.
+## What This Is Not
 
----
-
-##  Key Capabilities
-
-### 1. Instant Mode Switching
-- **Fast Transitions**: Switches between Mapping and Navigation modes in seconds.
-- **Optimized Performance**: Drastically reduces CPU and memory overhead compared to standard launch-and-kill approaches (AKA using the CLI!!!).
-
-### 2. High Reliability & Fault Tolerance
-- **Atomic Operations**: The system ensures the robot is never left in an undefined or broken state. If a transition cannot complete successfully, it automatically reverts to a safe idle state.
-- **Clean Shutdowns**: Guarantees no lingering processes or "zombie" nodes, ensuring long-term system stability on edge hardware.
-
-### 3. Safety-First Design
-- **Readiness**: Transitions only occur when the system has verified that all necessary data (Sensor Transforms, Map Topics, etc.) is valid and available.
-- **Optimized**: Tuned specifically for the constraints of edge compute devices like the Raspberry Pi, handling variable boot times and resource constraints gracefully.
-
-Disclaimer: These systems do not claim to be 100 percent reliable or Safe, caution should still be exercised! Do your own Due Diligence!  
-
-### 4. Fast API Service
-- **External Control**: Send commands to your navigation stack via a web API, allowing external control via a custom web app!
-- **SLAM and NAV Support**: Basic control over your navigation stack, such as map saving, map selecting, parameters, and more.
-
-*Disclaimer: The API is open—you need to design your own security solution for a production machine!*
+- Not a complete robot framework
+- Not hardened for production use
+- Not a security solution (the API is completely open)
+- Not tested beyond Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy
 
 ---
 
-## Architecture
+## Requirements
 
-### On-Demand Nav2 Pattern
-The state manager uses an **on-demand launch strategy** for Nav2 to avoid lifecycle state issues:
-- Nav2 stack is **only launched** when transitioning to NAVIGATION mode
-- This prevents nodes from entering the unrecoverable `finalized` state
-- SLAM and Nav2 stacks are mutually exclusive—never running simultaneously
+**ROS 2 Jazzy** with these packages installed:
+- `nav2_bringup`
+- `slam_toolbox`
+- `nav2_msgs`
+- `lifecycle_msgs`
 
-### SLAM Lifecycle Activation
-When entering MAPPING mode, the system explicitly activates the `slam_toolbox` lifecycle node:
-1. Launch SLAM process
-2. Wait for node to appear in the ROS graph
-3. Call `configure` → `activate` lifecycle transitions
-4. Verify map topic availability before completing transition
+**Hardware layer** must be running separately:
+- Publishes `odom → base_link` TF (e.g., from EKF or wheel odometry)
+- LiDAR providing `/scan` topic
+
+**Configuration files** (not included):
+- `nav2_params.yaml` - Nav2 configuration
+- `slam_params.yaml` - SLAM Toolbox configuration
+- These must be passed as launch parameters
 
 ---
 
-## Usage Guide
+## Capabilities
 
-### 1. Launch the System
-```bash
-ros2 launch ardk_lifecycle system.launch.py
+### Modes
+| Mode | Value | What It Does |
+|------|-------|--------------|
+| IDLE | 0 | Nothing running, motion stopped |
+| MAPPING | 1 | slam_toolbox active, teleop allowed |
+| NAVIGATION | 2 | Nav2 stack active, goal navigation enabled |
+
+### REST API Endpoints
+
+**Mode Control**
+```
+POST /ardk/mode         Switch modes
+GET  /ardk/status       Current state, health, errors
+POST /ardk/clear_fault  Clear latched fault
 ```
 
-### 2. Start the API Server
+**Map Catalog**
+```
+POST /maps/save         Save current map with name
+GET  /maps              List all saved maps
+POST /maps/load         Load map by name (switches to NAV)
+```
+
+**Navigation**
+```
+POST /nav/goal          Send x,y goal (requires NAV mode)
+POST /nav/cancel        Cancel active goal
+GET  /nav/state         idle/active/succeeded/failed/canceled
+POST /nav/map           Hot-swap map while in NAV
+```
+
+### Stable Topics
+These topics always exist and switch sources based on mode:
+- `/ardk/map` - Current map (SLAM or static)
+- `/ardk/pose` - Current pose (slam_toolbox or AMCL)
+- `/ardk_status` - Mode, health, errors
+
+### Health Monitoring
+- TF chain freshness check (odom→base_link)
+- Required service presence check
+- nav_stack_state: inactive/active/faulted
+
+---
+
+## Usage
+
+### 1. Start Your Hardware Layer First
+```bash
+# Whatever launches your robot's odometry, LiDAR, etc.
+bash ~/your_robot/hardware_start.sh
+```
+
+### 2. Launch State Manager
+```bash
+ros2 launch ardk_lifecycle system.launch.py \
+  nav_config_path:=/path/to/nav2_params.yaml \
+  slam_config_path:=/path/to/slam_params.yaml \
+  default_map_path:=/path/to/default_map
+```
+
+### 3. Start API Server
 ```bash
 ros2 run ardk_api server
-```
-*Runs on `http://0.0.0.0:8000`*
-
-### 3. API Control (Recommended)
-
-**Switch to Mapping:**
-```bash
-curl -X POST "http://localhost:8000/ardk/mode" -d '{"mode": 1}'
+# Runs on http://0.0.0.0:8000
 ```
 
-**Save Map:**
+### 4. Use It
 ```bash
-curl -X POST "http://localhost:8000/slam/save" -d '{"name": "/home/gio/ARDK_2/maps/my_map"}'
-```
+# Switch to mapping
+curl -X POST http://localhost:8000/ardk/mode -H "Content-Type: application/json" \
+  -d '{"mode": 1}'
 
-**Switch to Navigation:**
-```bash
-# Switches mode to NAV and loads the specified map
-curl -X POST "http://localhost:8000/ardk/mode" -d '{"mode": 2, "map_path": "/home/gio/ARDK_2/maps/my_map.yaml"}'
-```
+# Save map
+curl -X POST http://localhost:8000/maps/save -H "Content-Type: application/json" \
+  -d '{"name": "kitchen"}'
 
-**Hot-Swap Map (While in Nav):**
-```bash
-curl -X POST "http://localhost:8000/nav/map" -d '{"path": "/home/gio/ARDK_2/maps/another_map.yaml"}'
+# Load map and navigate
+curl -X POST http://localhost:8000/maps/load -H "Content-Type: application/json" \
+  -d '{"name": "kitchen"}'
+
+# Send goal
+curl -X POST http://localhost:8000/nav/goal -H "Content-Type: application/json" \
+  -d '{"x": 1.0, "y": 0.5}'
 ```
 
 ---
 
-## Verification
+## Testing
 
-The system includes verification tools to ensure stability on your hardware:
+### Integration Test
+Runs mode transitions, map save/load, status checks:
+```bash
+bash src/ardk_api/test_integration.sh
+```
 
-1.  **Lifecycle Cycle Test**:
-    ```bash
-    python3 src/ardk_lifecycle/tests/cycle_test.py
-    ```
+### Lifecycle Cycle Test
+Stress tests mode cycling:
+```bash
+python3 src/ardk_lifecycle/tests/cycle_test.py
+```
 
-2.  **Full API Integration Test**:
-    ```bash
-    bash src/ardk_api/test_integration.sh
-    ```
+---
 
-**Verified Platforms:**
-- Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy
+## Known Issues / Limitations
+
+1. **Hardware must be running first** - Nav2 will fail to activate if `odom→base_link` TF isn't being published
+
+2. **DDS service caching** - ROS 2 DDS caches service registrations for ~60s after process death, so we rely on process termination rather than service disappearance for exclusivity checks
+
+3. **Lifecycle manager node list** - `nav2_params.yaml` must list all 10 nodes that Nav2 Jazzy's `bringup_launch.py` actually launches, or the lifecycle manager will hang
+
+4. **No security** - The API has no authentication; add your own if exposing to a network
+
+5. **Tested only on RPi 5** - Other hardware may need tuning (timeouts, bond_timeout, etc.)
+
+---
+
+## File Structure
+
+```
+src/ardk_lifecycle/
+├── scripts/state_manager.py    # Main orchestrator
+├── ardk/
+│   ├── runners/                # SLAM and Nav2 process control
+│   └── core/                   # Readiness checks, health monitor
+├── msg/ARDKStatus.msg
+├── srv/SetMode.srv, ClearFault.srv
+└── launch/system.launch.py
+
+src/ardk_api/
+├── ardk_api/
+│   ├── main.py                 # FastAPI endpoints
+│   ├── ros_bridge.py           # ROS 2 clients
+│   └── map_catalog.py          # Named map storage
+└── test_integration.sh
+```
+
+---
+
+## Verified On
+
+- Raspberry Pi 5
+- Ubuntu 24.04
+- ROS 2 Jazzy

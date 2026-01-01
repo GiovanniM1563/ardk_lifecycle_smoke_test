@@ -142,6 +142,32 @@ curl -X POST http://localhost:8000/nav/goal -H "Content-Type: application/json" 
 
 ---
 
+## Sample Frontend
+
+A web-based control panel is included in `frontend/index.html`.
+
+**Features:**
+- Live map visualization from `/ardk/map`
+- Robot pose overlay (green triangle showing position and heading)
+- Mode control buttons with transition locking
+- Status panel with health indicators
+- Map catalog (save, list, load)
+- Navigation goal input (click on map or enter coordinates)
+
+**To run:**
+```bash
+# 1. Start rosbridge (required for map/pose streaming)
+ros2 run rosbridge_server rosbridge_websocket --ros-args -p port:=9090
+
+# 2. Serve frontend
+python3 -m http.server 8080 -d frontend
+
+# 3. Open in browser
+http://<robot-ip>:8080
+```
+
+The frontend auto-detects the robot host from the URL.
+
 ## Testing
 
 ### Integration Test
@@ -198,10 +224,10 @@ src/ardk_api/
 
 1. **Multiple stacks/Modularity** - Support for more stacks than just Nav2 and SLAM Toolbox or "mix and match" of supported modules. 
 2. **Simulator Integration** - Support for ROS 2 simulators like Gazebo or Ignition.
-3. **Control MUX** - Support for multiple control inputs and authorities 
+3. **Control MUX** - Support for multiple control inputs and authorities.
 4. **Security** - Add authentication and authorization to the API.
 5. **Testing** - Add more tests and test coverage.
 6. **Reliability** - Add more reliability and fault tolerance/handling. 
-
+7. **Frontend Example** - Add a frontend example.
 
 

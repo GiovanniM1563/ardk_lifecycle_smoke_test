@@ -64,9 +64,32 @@ async def lifespan(app: FastAPI):
 # --- App ---
 app = FastAPI(title="ARDK API", lifespan=lifespan)
 
+# CORS middleware for remote frontend access
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.post("/ardk/mode")
 async def set_mode(req: ModeRequest):
+    """Set robot mode with guards against duplicate/conflicting requests."""
     try:
+        # Check current status first
+        status = ros_manager.node.get_status()
+        
+        if status is not None:
+            # Guard: Reject if already in requested mode
+            if status["mode"] == req.mode:
+                return {"success": False, "message": f"Already in mode {req.mode}"}
+            
+            # Guard: Reject if transition in progress
+            if status["transition_step"] != "idle":
+                return {"success": False, "message": f"Transition in progress: {status['transition_step']}"}
+        
         res = await ros_manager.node.set_mode(req.mode, req.map_path)
         return {"success": res.success, "message": res.message}
     except Exception as e:

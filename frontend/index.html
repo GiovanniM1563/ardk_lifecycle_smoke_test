@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARDK Control Panel</title>
+    <script src="https://cdn.jsdelivr.net/npm/roslib@1/build/roslib.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 20px;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            grid-column: 1 / -1;
+            font-size: 1.5rem;
+            color: #4ade80;
+            margin-bottom: 10px;
+        }
+
+        .panel {
+            background: #252542;
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .panel h2 {
+            font-size: 0.9rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+
+        /* Map Canvas */
+        .map-container {
+            position: relative;
+            background: #1a1a2e;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #mapCanvas {
+            width: 100%;
+            height: 500px;
+            background: #111;
+            cursor: crosshair;
+        }
+
+        .map-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        /* Mode Buttons */
+        .mode-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .mode-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .mode-btn.idle {
+            background: #374151;
+            color: #9ca3af;
+        }
+
+        .mode-btn.mapping {
+            background: #f59e0b;
+            color: #000;
+        }
+
+        .mode-btn.nav {
+            background: #3b82f6;
+            color: #fff;
+        }
+
+        .mode-btn.active {
+            box-shadow: 0 0 0 3px #4ade80;
+        }
+
+        .mode-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Status */
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .status-item {
+            background: #1a1a2e;
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .status-label {
+            font-size: 0.7rem;
+            color: #666;
+            text-transform: uppercase;
+        }
+
+        .status-value {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+
+        .indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .indicator.green {
+            background: #4ade80;
+        }
+
+        .indicator.red {
+            background: #ef4444;
+        }
+
+        .indicator.yellow {
+            background: #f59e0b;
+        }
+
+        /* Error */
+        .error-box {
+            background: #7f1d1d;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 16px;
+            font-size: 0.85rem;
+            display: none;
+        }
+
+        .error-box.show {
+            display: block;
+        }
+
+        /* Map Catalog */
+        .map-list {
+            max-height: 150px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+        }
+
+        .map-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            background: #1a1a2e;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            cursor: pointer;
+        }
+
+        .map-item:hover {
+            background: #2a2a4e;
+        }
+
+        .map-name {
+            font-weight: 500;
+        }
+
+        .map-meta {
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        /* Inputs */
+        .input-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 6px;
+            background: #1a1a2e;
+            color: #eee;
+            font-size: 0.9rem;
+        }
+
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #4ade80;
+            color: #000;
+        }
+
+        .btn-secondary {
+            background: #374151;
+            color: #9ca3af;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: #fff;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Navigation */
+        .goal-display {
+            background: #1a1a2e;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .goal-state {
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .goal-state.idle {
+            color: #666;
+        }
+
+        .goal-state.active {
+            color: #f59e0b;
+        }
+
+        .goal-state.succeeded {
+            color: #4ade80;
+        }
+
+        .goal-state.failed {
+            color: #ef4444;
+        }
+
+        .goal-state.canceled {
+            color: #888;
+        }
+
+        /* Connection Status */
+        .connection {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .connection.connected {
+            background: #4ade80;
+            color: #000;
+        }
+
+        .connection.disconnected {
+            background: #ef4444;
+            color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="connection disconnected" id="rosStatus">ROS: Disconnected</div>
+
+    <div class="container">
+        <h1>ARDK Control Panel</h1>
+
+        <!-- Map Display -->
+        <div class="panel map-container">
+            <canvas id="mapCanvas"></canvas>
+            <div class="map-info" id="mapInfo">No map data</div>
+        </div>
+
+        <!-- Control Panel -->
+        <div>
+            <!-- Mode Control -->
+            <div class="panel">
+                <h2>Mode Control</h2>
+                <div class="mode-buttons">
+                    <button class="mode-btn idle" onclick="setMode(0)">IDLE</button>
+                    <button class="mode-btn mapping" onclick="setMode(1)">MAPPING</button>
+                    <button class="mode-btn nav" onclick="setMode(2)">NAVIGATION</button>
+                </div>
+
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-label">Current Mode</div>
+                        <div class="status-value" id="currentMode">--</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">Transition</div>
+                        <div class="status-value" id="transitionStep">--</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">TF Chain</div>
+                        <div class="status-value" id="tfStatus">--</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-label">Services</div>
+                        <div class="status-value" id="servicesStatus">--</div>
+                    </div>
+                </div>
+
+                <div class="error-box" id="errorBox"></div>
+
+                <button class="btn-secondary" style="width:100%" onclick="clearFault()">Clear Fault</button>
+            </div>
+
+            <!-- Map Catalog -->
+            <div class="panel" style="margin-top:16px">
+                <h2>Map Catalog</h2>
+                <div class="map-list" id="mapList">
+                    <div style="color:#666;text-align:center;padding:20px">Loading...</div>
+                </div>
+                <div class="input-row">
+                    <input type="text" id="mapName" placeholder="Map name">
+                    <button class="btn-primary" onclick="saveMap()">Save</button>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="panel" style="margin-top:16px">
+                <h2>Navigation</h2>
+                <div class="goal-display">
+                    <div class="status-label">Goal State</div>
+                    <div class="goal-state idle" id="goalState">idle</div>
+                    <div style="font-size:0.8rem;color:#666;margin-top:4px" id="goalMessage">Click map to set goal</div>
+                </div>
+                <div class="input-row">
+                    <input type="number" id="goalX" placeholder="X" step="0.1">
+                    <input type="number" id="goalY" placeholder="Y" step="0.1">
+                    <button class="btn-primary" onclick="sendGoal()">Go</button>
+                </div>
+                <button class="btn-danger" style="width:100%;margin-top:8px" onclick="cancelGoal()">Cancel Goal</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration - auto-detect host from URL for remote access
+        const ROBOT_HOST = window.location.hostname;
+        const API_BASE = `http://${ROBOT_HOST}:8000`;
+        const ROSBRIDGE_URL = `ws://${ROBOT_HOST}:9090`;
+
+        // State
+        let currentMode = 0;
+        let mapData = null;
+        let mapResolution = 0.05;
+        let mapOrigin = [0, 0];
+        let mapWidth = 0;
+        let mapHeight = 0;
+
+        // Robot pose
+        let robotPose = null; // {x, y, theta}
+
+        // Canvas setup
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+            renderMap();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // ROS Connection
+        const ros = new ROSLIB.Ros({ url: ROSBRIDGE_URL });
+
+        ros.on('connection', () => {
+            document.getElementById('rosStatus').textContent = 'ROS: Connected';
+            document.getElementById('rosStatus').className = 'connection connected';
+            subscribeToMap();
+        });
+
+        ros.on('error', (error) => {
+            console.error('ROS error:', error);
+        });
+
+        ros.on('close', () => {
+            document.getElementById('rosStatus').textContent = 'ROS: Disconnected';
+            document.getElementById('rosStatus').className = 'connection disconnected';
+        });
+
+        // Subscribe to map
+        function subscribeToMap() {
+            const mapTopic = new ROSLIB.Topic({
+                ros: ros,
+                name: '/ardk/map',
+                messageType: 'nav_msgs/OccupancyGrid'
+            });
+
+            mapTopic.subscribe((message) => {
+                mapData = message.data;
+                mapWidth = message.info.width;
+                mapHeight = message.info.height;
+                mapResolution = message.info.resolution;
+                mapOrigin = [message.info.origin.position.x, message.info.origin.position.y];
+                document.getElementById('mapInfo').textContent =
+                    `${mapWidth}x${mapHeight} @ ${mapResolution.toFixed(3)}m/px`;
+                renderMap();
+            });
+
+            // Subscribe to pose
+            const poseTopic = new ROSLIB.Topic({
+                ros: ros,
+                name: '/ardk/pose',
+                messageType: 'geometry_msgs/PoseWithCovarianceStamped'
+            });
+
+            poseTopic.subscribe((message) => {
+                const pos = message.pose.pose.position;
+                const orient = message.pose.pose.orientation;
+                // Convert quaternion to yaw
+                const siny = 2.0 * (orient.w * orient.z + orient.x * orient.y);
+                const cosy = 1.0 - 2.0 * (orient.y * orient.y + orient.z * orient.z);
+                const theta = Math.atan2(siny, cosy);
+
+                robotPose = { x: pos.x, y: pos.y, theta: theta };
+                renderMap(); // Re-render to show updated pose
+            });
+        }
+
+        // Render map
+        function renderMap() {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (!mapData || !mapWidth || !mapHeight) return;
+
+            const scale = Math.min(canvas.width / mapWidth, canvas.height / mapHeight);
+            const offsetX = (canvas.width - mapWidth * scale) / 2;
+            const offsetY = (canvas.height - mapHeight * scale) / 2;
+
+            const imageData = ctx.createImageData(mapWidth, mapHeight);
+
+            for (let i = 0; i < mapData.length; i++) {
+                const val = mapData[i];
+                let color;
+                if (val === -1) {
+                    color = [50, 50, 60]; // Unknown
+                } else if (val === 0) {
+                    color = [200, 200, 200]; // Free
+                } else {
+                    color = [20, 20, 30]; // Occupied
+                }
+                imageData.data[i * 4] = color[0];
+                imageData.data[i * 4 + 1] = color[1];
+                imageData.data[i * 4 + 2] = color[2];
+                imageData.data[i * 4 + 3] = 255;
+            }
+
+            // Create temp canvas for scaling
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = mapWidth;
+            tempCanvas.height = mapHeight;
+            tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
+            // Flip Y and draw scaled
+            ctx.save();
+            ctx.translate(offsetX, offsetY + mapHeight * scale);
+            ctx.scale(scale, -scale);
+            ctx.drawImage(tempCanvas, 0, 0);
+            ctx.restore();
+
+            // Draw robot pose
+            if (robotPose) {
+                const robotPixelX = (robotPose.x - mapOrigin[0]) / mapResolution;
+                const robotPixelY = (robotPose.y - mapOrigin[1]) / mapResolution;
+
+                const screenX = offsetX + robotPixelX * scale;
+                const screenY = offsetY + (mapHeight - robotPixelY) * scale;
+
+                // Draw robot as triangle
+                ctx.save();
+                ctx.translate(screenX, screenY);
+                ctx.rotate(-robotPose.theta); // Negative because canvas Y is flipped
+
+                const robotSize = 15;
+                ctx.beginPath();
+                ctx.moveTo(robotSize, 0);  // Nose
+                ctx.lineTo(-robotSize * 0.7, -robotSize * 0.6);
+                ctx.lineTo(-robotSize * 0.7, robotSize * 0.6);
+                ctx.closePath();
+
+                ctx.fillStyle = '#4ade80';
+                ctx.fill();
+                ctx.strokeStyle = '#166534';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        // Map click -> goal
+        canvas.addEventListener('click', (e) => {
+            if (currentMode !== 2) {
+                alert('Switch to NAVIGATION mode first');
+                return;
+            }
+            if (!mapData || !mapWidth) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            const scale = Math.min(canvas.width / mapWidth, canvas.height / mapHeight);
+            const offsetX = (canvas.width - mapWidth * scale) / 2;
+            const offsetY = (canvas.height - mapHeight * scale) / 2;
+
+            const mapPixelX = (clickX - offsetX) / scale;
+            const mapPixelY = mapHeight - (clickY - offsetY) / scale;
+
+            const worldX = mapOrigin[0] + mapPixelX * mapResolution;
+            const worldY = mapOrigin[1] + mapPixelY * mapResolution;
+
+            document.getElementById('goalX').value = worldX.toFixed(2);
+            document.getElementById('goalY').value = worldY.toFixed(2);
+            sendGoal();
+        });
+
+        // API Functions
+        let isTransitioning = false;
+
+        async function setMode(mode) {
+            if (isTransitioning) {
+                console.log('Transition in progress, ignoring click');
+                return;
+            }
+
+            // Lock buttons immediately
+            isTransitioning = true;
+            updateButtonStates();
+
+            try {
+                const res = await fetch(`${API_BASE}/ardk/mode`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode })
+                });
+                const data = await res.json();
+                if (!data.success) alert(data.message);
+            } catch (e) {
+                alert('Error: ' + e.message);
+                isTransitioning = false;
+                updateButtonStates();
+            }
+        }
+
+        function updateButtonStates() {
+            const buttons = document.querySelectorAll('.mode-btn');
+            buttons.forEach(btn => {
+                btn.disabled = isTransitioning;
+            });
+        }
+
+        async function clearFault() {
+            try {
+                await fetch(`${API_BASE}/ardk/clear_fault`, { method: 'POST' });
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function loadMaps() {
+            try {
+                const res = await fetch(`${API_BASE}/maps`);
+                const data = await res.json();
+                const list = document.getElementById('mapList');
+                if (data.maps.length === 0) {
+                    list.innerHTML = '<div style="color:#666;text-align:center;padding:20px">No maps saved</div>';
+                    return;
+                }
+                list.innerHTML = data.maps.map(m => `
+                    <div class="map-item" onclick="loadMap('${m.name}')">
+                        <div>
+                            <div class="map-name">${m.name}</div>
+                            <div class="map-meta">${m.resolution ? m.resolution.toFixed(3) + 'm/px' : ''}</div>
+                        </div>
+                        <span style="color:#4ade80">→</span>
+                    </div>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load maps:', e);
+            }
+        }
+
+        async function saveMap() {
+            const name = document.getElementById('mapName').value.trim();
+            if (!name) {
+                alert('Enter a map name');
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE}/maps/save`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('mapName').value = '';
+                    loadMaps();
+                } else {
+                    alert(data.detail || 'Save failed');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function loadMap(name) {
+            try {
+                const res = await fetch(`${API_BASE}/maps/load`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const data = await res.json();
+                if (!data.success) alert(data.message);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function sendGoal() {
+            const x = parseFloat(document.getElementById('goalX').value);
+            const y = parseFloat(document.getElementById('goalY').value);
+            if (isNaN(x) || isNaN(y)) {
+                alert('Enter valid X and Y coordinates');
+                return;
+            }
+            try {
+                const res = await fetch(`${API_BASE}/nav/goal`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x, y })
+                });
+                const data = await res.json();
+                if (data.detail) alert(data.detail);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        async function cancelGoal() {
+            try {
+                await fetch(`${API_BASE}/nav/cancel`, { method: 'POST' });
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+
+        // Status polling
+        async function pollStatus() {
+            try {
+                // ARDK status
+                const res = await fetch(`${API_BASE}/ardk/status`);
+                const s = await res.json();
+
+                currentMode = s.mode;
+                const modeNames = ['IDLE', 'MAPPING', 'NAVIGATION'];
+                const modeColors = ['#9ca3af', '#f59e0b', '#3b82f6'];
+
+                document.getElementById('currentMode').textContent = modeNames[s.mode] || 'UNKNOWN';
+                document.getElementById('currentMode').style.color = modeColors[s.mode] || '#888';
+                document.getElementById('transitionStep').textContent = s.transition_step;
+
+                // Health indicators
+                const tfEl = document.getElementById('tfStatus');
+                tfEl.innerHTML = `<span class="indicator ${s.tf_valid ? 'green' : 'red'}"></span>${s.tf_valid ? 'OK' : 'Missing'}`;
+
+                const svcEl = document.getElementById('servicesStatus');
+                svcEl.innerHTML = `<span class="indicator ${s.services_valid ? 'green' : 'red'}"></span>${s.services_valid ? 'OK' : 'Missing'}`;
+
+                // Error
+                const errorBox = document.getElementById('errorBox');
+                if (s.last_error) {
+                    errorBox.textContent = s.last_error;
+                    errorBox.classList.add('show');
+                } else {
+                    errorBox.classList.remove('show');
+                }
+
+                // Mode buttons - unlock when transition is idle
+                const transitioning = s.transition_step !== 'idle';
+                if (isTransitioning && !transitioning) {
+                    // Transition just finished
+                    isTransitioning = false;
+                }
+                updateButtonStates();
+
+                document.querySelectorAll('.mode-btn').forEach((btn, i) => {
+                    btn.classList.toggle('active', i === s.mode);
+                });
+
+                // Nav state
+                const navRes = await fetch(`${API_BASE}/nav/state`);
+                const navState = await navRes.json();
+                const goalStateEl = document.getElementById('goalState');
+                goalStateEl.textContent = navState.state;
+                goalStateEl.className = 'goal-state ' + navState.state;
+                document.getElementById('goalMessage').textContent = navState.message || 'Click map to set goal';
+
+            } catch (e) {
+                console.error('Status poll failed:', e);
+            }
+        }
+
+        // Initialize
+        loadMaps();
+        setInterval(pollStatus, 1000);
+        pollStatus();
+    </script>
+</body>
+
+</html>

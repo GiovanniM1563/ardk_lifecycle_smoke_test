@@ -1,6 +1,6 @@
 # ARDK - Appliance Robot Development Kit
 
-A ROS 2 orchestration layer that manages mode transitions between SLAM mapping and Nav2 navigationm with support for more stacks on the way.
+A ROS 2 orchestration layer that manages mode transitions between SLAM mapping and Nav2 navigation with support for more stacks on the way.
 
 **Status: Work in Progress** - Core functionality is implemented and tested on a single platform. Expect rough edges.
 

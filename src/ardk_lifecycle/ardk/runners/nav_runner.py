@@ -4,27 +4,31 @@ Nav2 runner for ARDK.
 Provides start/stop/load_map and lifecycle management operations.
 """
 import subprocess
+from typing import Optional
 
 from rclpy.node import Node
 from nav2_msgs.srv import ManageLifecycleNodes, LoadMap
 
 from ardk.core.process_group import start_process, stop_process_group
-from ardk.core.service_utils import call_service, call_lifecycle_service, Timeouts
+from ardk.core.service_utils import call_service, Timeouts
+from ardk.core.robot_config import RobotConfig, get_config
 
 
-# Service Names
-SRV_LOC = "/lifecycle_manager_localization/manage_nodes"
-SRV_NAV = "/lifecycle_manager_navigation/manage_nodes"
-SRV_LOAD_MAP = "/map_server/load_map"
-
-
-def start(nav2_cmd: str) -> subprocess.Popen:
+def start(nav2_cmd: Optional[str] = None, config: Optional[RobotConfig] = None, map_path: str = "") -> subprocess.Popen:
     """
     Launch Nav2 stack (bringup).
-    Must contain 'autostart:=true' if you want it to come up fully, 
-    OR 'autostart:=false' if you want manual control via startup_loc_nav.
+    
+    If nav2_cmd is provided, use it directly.
+    Otherwise, build command from config.
     """
-    return start_process(nav2_cmd, stdout=None, stderr=None)
+    cfg = config or get_config()
+    
+    if nav2_cmd:
+        cmd = nav2_cmd
+    else:
+        cmd = cfg.get_nav2_launch_cmd(map_path)
+    
+    return start_process(cmd, stdout=None, stderr=None)
 
 
 def stop(handle: subprocess.Popen) -> None:
@@ -32,15 +36,17 @@ def stop(handle: subprocess.Popen) -> None:
     stop_process_group(handle)
 
 
-def load_map(node: Node, map_yaml: str, timeout_sec: float = None, client=None) -> None:
+def load_map(node: Node, map_yaml: str, timeout_sec: float = None, 
+             client=None, config: Optional[RobotConfig] = None) -> None:
     """
     Call map_server/load_map with robust timeout handling.
     """
+    cfg = config or get_config()
     if timeout_sec is None:
         timeout_sec = Timeouts.LOAD_MAP
         
     if client is None:
-        client = node.create_client(LoadMap, SRV_LOAD_MAP)
+        client = node.create_client(LoadMap, cfg.map_server_load_map)
     
     req = LoadMap.Request()
     req.map_url = map_yaml
@@ -49,7 +55,7 @@ def load_map(node: Node, map_yaml: str, timeout_sec: float = None, client=None) 
         node, client, req,
         wait_service_sec=Timeouts.DISCOVERY_NORMAL,
         call_timeout_sec=timeout_sec,
-        service_name=SRV_LOAD_MAP
+        service_name=cfg.map_server_load_map
     )
     
     if hasattr(resp, "result"):
@@ -59,40 +65,50 @@ def load_map(node: Node, map_yaml: str, timeout_sec: float = None, client=None) 
             raise RuntimeError(f"LoadMap failed with code {resp.result}")
 
 
-def startup_localization(node: Node, timeout_sec: float = None, client=None) -> None:
+def startup_localization(node: Node, timeout_sec: float = None, 
+                         client=None, config: Optional[RobotConfig] = None) -> None:
     """Start localization lifecycle nodes."""
-    _manage_lifecycle(node, SRV_LOC, ManageLifecycleNodes.Request.STARTUP, 
+    cfg = config or get_config()
+    _manage_lifecycle(node, cfg.lifecycle_manager_loc, ManageLifecycleNodes.Request.STARTUP, 
                       timeout_sec, client, is_startup=True)
 
 
-def shutdown_localization(node: Node, timeout_sec: float = None, client=None) -> None:
+def shutdown_localization(node: Node, timeout_sec: float = None, 
+                          client=None, config: Optional[RobotConfig] = None) -> None:
     """Shutdown localization lifecycle nodes."""
-    _manage_lifecycle(node, SRV_LOC, ManageLifecycleNodes.Request.SHUTDOWN, 
+    cfg = config or get_config()
+    _manage_lifecycle(node, cfg.lifecycle_manager_loc, ManageLifecycleNodes.Request.SHUTDOWN, 
                       timeout_sec, client, is_startup=False)
 
 
-def startup_navigation(node: Node, timeout_sec: float = None, client=None) -> None:
+def startup_navigation(node: Node, timeout_sec: float = None, 
+                       client=None, config: Optional[RobotConfig] = None) -> None:
     """Start navigation lifecycle nodes."""
-    _manage_lifecycle(node, SRV_NAV, ManageLifecycleNodes.Request.STARTUP, 
+    cfg = config or get_config()
+    _manage_lifecycle(node, cfg.lifecycle_manager_nav, ManageLifecycleNodes.Request.STARTUP, 
                       timeout_sec, client, is_startup=True)
 
 
-def shutdown_navigation(node: Node, timeout_sec: float = None, client=None) -> None:
+def shutdown_navigation(node: Node, timeout_sec: float = None, 
+                        client=None, config: Optional[RobotConfig] = None) -> None:
     """Shutdown navigation lifecycle nodes."""
-    _manage_lifecycle(node, SRV_NAV, ManageLifecycleNodes.Request.SHUTDOWN, 
+    cfg = config or get_config()
+    _manage_lifecycle(node, cfg.lifecycle_manager_nav, ManageLifecycleNodes.Request.SHUTDOWN, 
                       timeout_sec, client, is_startup=False)
 
 
-def startup_loc_nav(node: Node, timeout_sec: float = None, client_loc=None, client_nav=None) -> None:
+def startup_loc_nav(node: Node, timeout_sec: float = None, 
+                    client_loc=None, client_nav=None, config: Optional[RobotConfig] = None) -> None:
     """Start localization then navigation lifecycle managers."""
-    startup_localization(node, timeout_sec, client=client_loc)
-    startup_navigation(node, timeout_sec, client=client_nav)
+    startup_localization(node, timeout_sec, client=client_loc, config=config)
+    startup_navigation(node, timeout_sec, client=client_nav, config=config)
 
 
-def shutdown_loc_nav(node: Node, timeout_sec: float = None, client_loc=None, client_nav=None) -> None:
+def shutdown_loc_nav(node: Node, timeout_sec: float = None, 
+                     client_loc=None, client_nav=None, config: Optional[RobotConfig] = None) -> None:
     """Shutdown navigation then localization lifecycle managers."""
-    shutdown_navigation(node, timeout_sec, client=client_nav)
-    shutdown_localization(node, timeout_sec, client=client_loc)
+    shutdown_navigation(node, timeout_sec, client=client_nav, config=config)
+    shutdown_localization(node, timeout_sec, client=client_loc, config=config)
 
 
 def _manage_lifecycle(

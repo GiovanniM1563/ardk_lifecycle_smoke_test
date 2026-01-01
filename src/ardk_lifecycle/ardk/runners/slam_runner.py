@@ -14,17 +14,26 @@ from std_msgs.msg import String
 
 from ardk.core.process_group import start_process, stop_process_group
 from ardk.core.service_utils import call_service, Timeouts
+from ardk.core.robot_config import RobotConfig, get_config
 
 
-def start(params_yaml: Optional[str] = None) -> subprocess.Popen:
+def start(params_yaml: Optional[str] = None, config: Optional[RobotConfig] = None) -> subprocess.Popen:
     """
     Launch slam_toolbox with autostart:=false for explicit lifecycle control.
     ARDK will manually configure/activate the node after launch.
     Returns the Popen handle.
     """
-    cmd = "ros2 launch slam_toolbox online_sync_launch.py autostart:=false"
+    cfg = config or get_config()
+    cmd = cfg.slam_launch_cmd
+    
+    # Ensure autostart is false for lifecycle control
+    if "autostart:=" not in cmd:
+        cmd += " autostart:=false"
+    
     if params_yaml:
         cmd += f" slam_params_file:={params_yaml}"
+    elif cfg.slam_params_file:
+        cmd += f" slam_params_file:={cfg.slam_params_file}"
     
     return start_process(cmd)
 
@@ -34,12 +43,13 @@ def stop(handle: subprocess.Popen) -> None:
     stop_process_group(handle)
 
 
-def activate(node: Node, timeout_sec: float = 30.0) -> None:
+def activate(node: Node, timeout_sec: float = 30.0, config: Optional[RobotConfig] = None) -> None:
     """
     Activate the slam_toolbox lifecycle node (configure + activate).
     Must be called after start() and after the node appears in the graph.
     """
-    change_state_srv = "/slam_toolbox/change_state"
+    cfg = config or get_config()
+    change_state_srv = cfg.slam_change_state
     client = node.create_client(ChangeState, change_state_srv)
     
     # Configure transition (1)
@@ -69,12 +79,13 @@ def activate(node: Node, timeout_sec: float = 30.0) -> None:
     node.get_logger().info("SLAM Toolbox activated.")
 
 
-def deactivate(node: Node, timeout_sec: float = 15.0) -> None:
+def deactivate(node: Node, timeout_sec: float = 15.0, config: Optional[RobotConfig] = None) -> None:
     """
     Gracefully deactivate and cleanup the slam_toolbox lifecycle node.
     Should be called before stop() for production-grade shutdown.
     """
-    change_state_srv = "/slam_toolbox/change_state"
+    cfg = config or get_config()
+    change_state_srv = cfg.slam_change_state
     client = node.create_client(ChangeState, change_state_srv)
     
     if not client.wait_for_service(timeout_sec=2.0):
@@ -109,15 +120,16 @@ def deactivate(node: Node, timeout_sec: float = 15.0) -> None:
         node.get_logger().warn(f"SLAM graceful shutdown failed: {e}, will force stop")
 
 
-def save_map(node: Node, out_prefix: str, timeout_sec: float = None) -> None:
+def save_map(node: Node, out_prefix: str, timeout_sec: float = None, config: Optional[RobotConfig] = None) -> None:
     """
     Call slam_toolbox/save_map service.
     out_prefix: Absolute path without extension.
     """
+    cfg = config or get_config()
     if timeout_sec is None:
         timeout_sec = Timeouts.SAVE_MAP
         
-    client = node.create_client(SaveMap, "/slam_toolbox/save_map")
+    client = node.create_client(SaveMap, cfg.slam_save_map)
 
     req = SaveMap.Request()
     # Handle version differences: some slam_toolbox use string, others use std_msgs/String
@@ -132,7 +144,7 @@ def save_map(node: Node, out_prefix: str, timeout_sec: float = None) -> None:
         node, client, req,
         wait_service_sec=Timeouts.DISCOVERY_NORMAL,
         call_timeout_sec=timeout_sec,
-        service_name="/slam_toolbox/save_map"
+        service_name=cfg.slam_save_map
     )
     
     if hasattr(resp, "result"):

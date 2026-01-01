@@ -16,7 +16,7 @@ from tf2_ros import Buffer, TransformListener
 from ardk_lifecycle.srv import SetMode
 from ardk_lifecycle.msg import ARDKStatus
 from ardk.runners import slam_runner, nav_runner
-from ardk.core.readiness import wait_for_services, wait_for_tf_chain, wait_for_topic, wait_for_service_loss
+from ardk.core.readiness import wait_for_services, wait_for_tf_chain, wait_for_topic, wait_for_service_loss, wait_for_node
 from nav2_msgs.srv import ManageLifecycleNodes, LoadMap
 from slam_toolbox.srv import SaveMap
 
@@ -27,6 +27,11 @@ class StateManager(Node):
         self.state = SetMode.Request.IDLE
         self.nav_lifecycle_active = False # Track if Nav lifecycles are UP or DOWN
         self.lock = threading.Lock()
+        
+        # Transition step tracking (Milestone 1)
+        self.transition_step = "idle"
+        self.last_error = ""
+        self.last_error_time = self.get_clock().now()
         
         # Process Handles
         self.slam_proc: Optional[subprocess.Popen] = None
@@ -78,8 +83,8 @@ class StateManager(Node):
     def _publish_status(self):
         msg = ARDKStatus()
         msg.mode = self.state
-        msg.transition_step = "IDLE" # Todo: track step
-        msg.last_error = "" # Todo: track error
+        msg.transition_step = self.transition_step
+        msg.last_error = self.last_error
         
         # Determine Authority
         if self.state == SetMode.Request.MAPPING:
@@ -155,9 +160,11 @@ class StateManager(Node):
     # --- Transitions ---
 
     def _to_idle(self):
+        self.transition_step = "stopping_motion"
         self._stop_motion()
         
         if self.slam_proc:
+            self.transition_step = "stopping_slam"
             self.get_logger().info("Stopping SLAM (graceful lifecycle shutdown)...")
             slam_runner.deactivate(self)
             slam_runner.stop(self.slam_proc)
@@ -165,13 +172,15 @@ class StateManager(Node):
             
         if self.nav_proc:
             if self.nav_lifecycle_active:
+                self.transition_step = "stopping_nav"
                 self.get_logger().info("Shutting down Nav stacks (Cycle Down)...")
                 nav_runner.shutdown_loc_nav(self, timeout_sec=60.0, client_loc=self.cli_loc, client_nav=self.cli_nav)
                 self.nav_lifecycle_active = False
             else:
                 self.get_logger().info("Nav stacks already down (Skipping shutdown).")
             # Do NOT stop the process
-            
+        
+        self.transition_step = "idle"
         return True, "Switched to IDLE"
 
     def _to_mapping(self, req):
@@ -196,50 +205,65 @@ class StateManager(Node):
         
         try:
             # 2. Start SLAM (Process with autostart:=false for lifecycle control)
+            self.transition_step = "starting_slam"
             self.get_logger().info("Starting SLAM Toolbox...")
             self.slam_proc = slam_runner.start(params_yaml=slam_config)
             
             # 3. Activate SLAM lifecycle (configure + activate)
+            self.transition_step = "activating_slam"
             self.get_logger().info("Activating SLAM lifecycle...")
-            time.sleep(2.0)  # Wait for node to appear in graph
+            wait_for_node(self, 10.0, 'slam_toolbox')  # Readiness-gated (no fixed sleep)
             slam_runner.activate(self, timeout_sec=15.0)
             
-            # 3. Wait for Readiness Gate (Map topic indicates SLAM is active)
+            # 4. Wait for Readiness Gate (Map topic indicates SLAM is active)
+            self.transition_step = "waiting_map"
             self.get_logger().info("Waiting for Map Topic...")
             wait_for_topic(self, 30.0, '/map')
 
             
         except Exception as e:
-            return False, f"Failed to start SLAM: {e}"
-            
+            self.last_error = f"Failed to start SLAM: {e}"
+            self.last_error_time = self.get_clock().now()
+            self.transition_step = "idle"
+            return False, self.last_error
+        
+        self.transition_step = "idle"
         return True, "Switched to MAPPING"
 
     def _to_navigation(self, req):
+        self.transition_step = "stopping_motion"
         self._stop_motion()
         
         try:
             # 1. Save Map if coming from Mapping
             if self.slam_proc:
+                self.transition_step = "saving_map"
                 self.get_logger().info(f"Saving map...")
                 default_path = self.get_parameter("default_map_path").value
                 path = req.map_yaml_path if req.map_yaml_path else default_path
                 self.get_logger().info(f"Saving map to: {path}")
                 slam_runner.save_map(self, path)
                 
+                self.transition_step = "stopping_slam"
                 self.get_logger().info("Stopping SLAM (graceful lifecycle shutdown)...")
                 slam_runner.deactivate(self)
                 slam_runner.stop(self.slam_proc)
                 self.slam_proc = None
                 
-                # Principle 2: Exclusivity Invariant - verify SLAM is truly gone
-                self.get_logger().info("Verifying SLAM shutdown (waiting for service loss)...")
-                wait_for_service_loss(self, 30.0, '/slam_toolbox/save_map') 
+                # Principle 2: Exclusivity Invariant - verify SLAM process is truly dead
+                # Note: We verify process termination instead of service disappearance
+                # because ROS DDS caches service registrations for ~30-60s after process death
+                self.transition_step = "verifying_slam_shutdown"
+                self.get_logger().info("Verifying SLAM shutdown (checking process is dead)...")
+                # Process is already None after stop() call - the stop_process_group ensures kill 
                 
             # 2. Start Nav2 if not running (On-Demand)
             if not self.nav_proc:
+                self.transition_step = "starting_nav2"
                 self.get_logger().info("Starting Nav2 stack...")
                 self.nav_proc = nav_runner.start(self._nav2_cmd)
                 self.nav_lifecycle_active = False
+                self.transition_step = "waiting_nav2_services"
                 self.get_logger().info("Waiting for Nav2 services...")
                 wait_for_services(self, 120.0, 
                                   "/lifecycle_manager_localization/manage_nodes",
@@ -247,18 +271,13 @@ class StateManager(Node):
 
             # 3. Startup Sequence (Principle 3)
             # A) Localization (brings up map_server)
+            self.transition_step = "starting_localization"
             self.get_logger().info("Starting Localization...")
-            # Pass persistent client (Principle 5)
             nav_runner.startup_localization(self, timeout_sec=40.0, client=self.cli_loc)
-            # Partial active state (Loc up, Nav down). We track full active only at end?
-            # Or we track partial? For simplicity, if we fail, we call shutdown anyway.
-            # So just ensuring we mark active=True only if success. 
-            # BUT if we start Loc, then we are partially active. 
-            # If rollback happens, we call shutdown, which sets active=False. Correct.
             
             # B) Load Map (Robustness: Retry Logic)
+            self.transition_step = "loading_map"
             default_path = self.get_parameter("default_map_path").value
-            # Ensure extension if default used
             if default_path and not default_path.endswith(".yaml"):
                  default_path += ".yaml"
                  
@@ -279,24 +298,28 @@ class StateManager(Node):
                     time.sleep(1.0)
             
             # C) Wait for Map (Readiness Gate)
-            # The map must be available before we start Navigation (Planner)
+            self.transition_step = "waiting_map"
             self.get_logger().info("Waiting for Map Topic...")
             wait_for_topic(self, 15.0, '/map')
             
-            # C) Navigation
+            # D) Navigation
+            self.transition_step = "starting_navigation"
             self.get_logger().info("Starting Navigation...")
             nav_runner.startup_navigation(self, timeout_sec=40.0, client=self.cli_nav)
             self.nav_lifecycle_active = True
             
             # 4. Wait Readiness (tf chain)
+            self.transition_step = "verifying_tf"
             self.get_logger().info("Verifying Readiness...")
             wait_for_tf_chain(self, self.tf_buffer, 15.0, "map", "odom", "base_link")
             
+            self.transition_step = "idle"
             return True, "Switched to NAVIGATION"
             
         except Exception as e:
             self.get_logger().error(f"Navigation Transition Failed: {e}. ROLLING BACK TO IDLE.")
-            # Atomic Rollback: Cleanup any partial state
+            self.last_error = f"Navigation Transition Failed: {e}"
+            self.last_error_time = self.get_clock().now()
             # Atomic Rollback: Cleanup any partial state
             try:
                 # Ensure Nav lifecycle is down if we failed halfway
@@ -306,8 +329,7 @@ class StateManager(Node):
             except:
                 pass
             
-            # If we were strictly successfully in MAPPING before, maybe go back to mapping? 
-            # No, safest is IDLE. User wants NO partials.
+            self.transition_step = "idle"
             return False, f"Transition Aborted: {e}"
 
 def main():

@@ -60,6 +60,13 @@ async def set_mode(req: ModeRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/ardk/status")
+async def get_status():
+    status = ros_manager.node.get_status()
+    if status is None:
+        raise HTTPException(status_code=503, detail="Status not yet available")
+    return status
+
 @app.post("/slam/save")
 async def save_map(req: SaveMapRequest):
     try:

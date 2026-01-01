@@ -37,6 +37,19 @@ def wait_for_service_loss(node: Node, timeout_sec: float, service_name: str) -> 
         time.sleep(0.1)
     raise RuntimeError(f"Timeout waiting for service to disappear: {service_name}")
 
+def wait_for_node(node: Node, timeout_sec: float, node_name: str) -> None:
+    """
+    Wait until 'node_name' appears in the ROS graph.
+    Used to replace fixed sleeps when waiting for a node to launch.
+    """
+    deadline = time.time() + timeout_sec
+    while rclpy.ok() and time.time() < deadline:
+        node_names = [n for n, _ in node.get_node_names_and_namespaces()]
+        if node_name in node_names:
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"Timeout waiting for node: {node_name}")
+
 def wait_for_topic(node: Node, timeout_sec: float, topic_name: str) -> None:
     """
     Wait until 'topic_name' appears in the graph.

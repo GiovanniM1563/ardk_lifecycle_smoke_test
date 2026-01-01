@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Msgs
 from ardk_lifecycle.srv import SetMode
+from ardk_lifecycle.msg import ARDKStatus
 from slam_toolbox.srv import SaveMap
 from nav2_msgs.srv import LoadMap
 from nav2_msgs.action import NavigateToPose, ComputePathToPose
@@ -27,6 +28,11 @@ class ARDKRosBridge(Node):
         # --- Action Clients ---
         self.act_nav = ActionClient(self, NavigateToPose, '/navigate_to_pose')
         self.act_plan = ActionClient(self, ComputePathToPose, '/compute_path_to_pose')
+        
+        # --- Status Subscription ---
+        self._latest_status = None
+        self.sub_status = self.create_subscription(
+            ARDKStatus, '/ardk_status', self._status_callback, 10)
 
         self.get_logger().info("ARDK API Bridge initialized.")
 
@@ -39,6 +45,23 @@ class ARDKRosBridge(Node):
         req.map_yaml_path = map_path
         
         return await self._call_service(self.cli_mode, req)
+
+    def _status_callback(self, msg: ARDKStatus):
+        self._latest_status = msg
+
+    def get_status(self):
+        """Returns the latest cached status from /ardk_status topic."""
+        if self._latest_status is None:
+            return None
+        s = self._latest_status
+        return {
+            "mode": s.mode,
+            "transition_step": s.transition_step,
+            "last_error": s.last_error,
+            "map_source": s.map_source,
+            "tf_authority": s.tf_authority,
+            "motion_authority": s.motion_authority
+        }
 
     async def save_map(self, name: str):
         # slam_toolbox requires std_msgs/String name wrapping
